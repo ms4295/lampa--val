@@ -1,170 +1,184 @@
-(function () {
-'use strict';
+(function() {
+    'use strict';
 
-function init() {
-    // Добавление плашек на постер (4K, HDR, рейтинг, год)
-    if (!document.getElementById('ultra-card-style')) {
-        var css =
-            '.ultra-card-info{position:absolute;left:0;right:0;top:0;bottom:0;pointer-events:none;}' +
-            '.ultra-card-top{position:absolute;top:0.4em;right:0.4em;display:flex;flex-direction:column;gap:0.25em;align-items:flex-end;}' +
-            '.ultra-card-bottom{position:absolute;left:0.4em;right:0.4em;bottom:0.4em;display:flex;justify-content:space-between;align-items:flex-end;gap:0.4em;}' +
-            '.ultra-card__badge{display:inline-flex;align-items:center;padding:0.2em 0.55em;color:#fff;font-weight:700;font-size:0.7em;border-radius:0.3em;letter-spacing:0.05em;text-transform:uppercase;box-shadow:0 1px 4px rgba(0,0,0,0.5);}' +
-            '.ultra-card__badge--4k{background:linear-gradient(135deg,#fa709a,#fee140);color:#1a1a1a;}' +
-            '.ultra-card__badge--hdr{background:linear-gradient(135deg,#11998e,#38ef7d);color:#0a2620;}' +
-            '.ultra-card__badge--hdrplus{background:linear-gradient(135deg,#834d9b,#d04ed6);}' +
-            '.ultra-card__chip{display:inline-flex;align-items:center;padding:0.25em 0.55em;font-weight:700;font-size:0.78em;border-radius:0.3em;color:#fff;background:rgba(0,0,0,0.65);box-shadow:0 1px 3px rgba(0,0,0,0.5);}' +
-            '.ultra-card__chip--rate{background:linear-gradient(135deg,#f7971e,#ffd200);color:#1a1a1a;}';
-        var style = document.createElement('style');
-        style.id = 'ultra-card-style';
-        style.textContent = css;
-        document.head.appendChild(style);
+    // ========== УЛУЧШЕНИЯ ИЗ FRAMO ==========
+
+    // Уникальный ID устройства (генерируется один раз)
+    var unic_id = Lampa.Storage.get('lampac_unic_id', '');
+    if (!unic_id) {
+        unic_id = Lampa.Utils.uid(8).toLowerCase();
+        Lampa.Storage.set('lampac_unic_id', unic_id);
     }
 
-    function getMovieFromCard(el) {
-        var $el = $(el);
-        var d = $el.data('card') || $el.data('cardData') || $el.data('movie') || $el.data('card_data');
-        if (d && (d.id || d.title || d.name)) return d;
-        return null;
+    // Получение email из хранилища Lampa
+    function getAccountEmail() {
+        return Lampa.Storage.get('account_email', '') ||
+               Lampa.Storage.get('lampac_profile_email', '') ||
+               '';
     }
 
-    function decorate(el, movie) {
-        try {
-            if (!el || !movie) return;
-            var $card = $(el);
-            if ($card.find('.ultra-card-info').length) return;
-
-            var year = '';
-            var date = movie.release_date || movie.first_air_date || movie.year || '';
-            if (date) year = String(date).substring(0, 4);
-
-            var rate = '';
-            if (movie.vote_average && Number(movie.vote_average) > 0) {
-                rate = Number(movie.vote_average).toFixed(1);
-            }
-
-            var bag = [
-                movie.title, movie.original_title,
-                movie.name, movie.original_name,
-                movie.quality, movie.overview, movie.tagline
-            ].filter(Boolean).join(' ').toLowerCase();
-
-            var has4k = /\b(4k|2160p?|uhd|ultra\s*hd)\b/.test(bag);
-            var hasHdrPlus = /hdr10\s*\+|hdr\s*\+|hdr\s*plus/.test(bag);
-            var hasHdr = !hasHdrPlus && /\bhdr\b|hdr10/.test(bag);
-
-            var top = [];
-            if (has4k)      top.push('<span class="ultra-card__badge ultra-card__badge--4k">4K</span>');
-            if (hasHdrPlus) top.push('<span class="ultra-card__badge ultra-card__badge--hdrplus">HDR+</span>');
-            else if (hasHdr) top.push('<span class="ultra-card__badge ultra-card__badge--hdr">HDR</span>');
-
-            var bottom = [];
-            if (rate) bottom.push('<span class="ultra-card__chip ultra-card__chip--rate">' + rate + '</span>');
-            else bottom.push('<span></span>');
-            if (year) bottom.push('<span class="ultra-card__chip ultra-card__chip--year">' + year + '</span>');
-
-            var hasContent = top.length || rate || year;
-            if (!hasContent) return;
-
-            var html = '<div class="ultra-card-info">';
-            if (top.length)    html += '<div class="ultra-card-top">'    + top.join('')    + '</div>';
-            if (bottom.length) html += '<div class="ultra-card-bottom">' + bottom.join('') + '</div>';
-            html += '</div>';
-
-            var $target = $card.find('.card__view').first();
-            if (!$target.length) $target = $card.find('.card__img').parent().first();
-            if (!$target.length) $target = $card;
-            var pos = $target.css('position');
-            if (!pos || pos === 'static') $target.css('position', 'relative');
-            $target.append(html);
-        } catch (err) {}
+    // Чистая функция для заголовков
+    function addHeaders() {
+        var key = Lampa.Storage.get('aesgcmkey', '') ||
+                  Lampa.Storage.get('kit_aesgcmkey', '');
+        if (key) return { 'X-Kit-AesGcm': key };
+        return {};
     }
 
-    // Кнопка "Смотреть онлайн"
-    function addOnlineButton(e) {
-        if (e.render.find('.ultra-online-button').length) return;
-        var btn = $('<div class="full-start__button selector ultra-online-button">' +
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="24" height="24">' +
-            '<path d="M8 5v14l11-7z"/>' +
-            '</svg>' +
-            '<span>Смотреть онлайн</span>' +
-            '</div>');
-        btn.on('hover:enter', function() {
-            Lampa.Activity.push({
-                url: '',
-                title: 'Онлайн',
-                component: 'online',
-                movie: e.data.movie,
-                page: 1
-            });
+    // Форматирование номера эпизода
+    function formatEpisodeNumber(n) {
+        return (n < 10 ? '0' : '') + n;
+    }
+
+    // ========== НАСТРОЙКИ СЕРВЕРОВ ==========
+    var connection_source = 'okeantv';
+
+    function qualityScore(k) {
+        var lower = String(k).toLowerCase();
+        if (lower.indexOf('4k') !== -1 || lower.indexOf('uhd') !== -1) return 2160;
+        var n = parseInt(k, 10);
+        return isNaN(n) ? 0 : n;
+    }
+
+    function filterMinQuality(qualityObj) {
+        if (!qualityObj || typeof qualityObj !== 'object' || Array.isArray(qualityObj)) return qualityObj;
+        Object.keys(qualityObj).forEach(function(k) {
+            if (qualityScore(k) < 1080) delete qualityObj[k];
         });
-        e.render.after(btn);
+        return qualityObj;
     }
 
-    // Сканирование карточек
-    function scan() {
-        try {
-            var nodes = document.querySelectorAll('.card');
-            for (var i = 0; i < nodes.length; i++) {
-                var el = nodes[i];
-                if ($(el).find('.ultra-card-info').length) continue;
-                var movie = getMovieFromCard(el);
-                if (movie) decorate(el, movie);
-            }
-        } catch (err) {}
+    function highestQualityKey(qualityObj) {
+        if (!qualityObj || typeof qualityObj !== 'object') return null;
+        var keys = Object.keys(qualityObj);
+        if (!keys.length) return null;
+        return keys.reduce(function(best, k) {
+            return qualityScore(k) > qualityScore(best) ? k : best;
+        }, keys[0]);
     }
 
-    Lampa.Listener.follow('card', function (e) {
-        if (e.type !== 'build') return;
-        var movie = e.object || e.data || e.card_data || {};
-        var $el = $(e.body || e.element || e.card || []);
-        if ($el.length && movie) decorate($el[0], movie);
-    });
+    var MIRRORS_SHOWY = [
+        'http://185.121.235.124:11176/',
+        'http://showypro.com/',
+        'http://smotretk.com/'
+    ];
+    var current_showy_index = 0;
 
-    // Кнопка при открытии полной карточки
-    Lampa.Listener.follow('full', function(e) {
-        if (e.type === 'complite') {
-            addOnlineButton({
-                render: e.object.activity.render().find('.view--torrent, .full-start__buttons'),
-                data: e.data || e
-            });
+    var SKAZ_ACCOUNTS = [
+        { email: 'naza---rov6@gmail.com', uid: 'rnemtvj3' },
+        { email: 'centt04@gmail.com', uid: 'fxz' },
+        { email: 'unionvoin@mail.ru', uid: 'freid5q' },
+        { email: 'solnce--v--kepke@yandex.ru', uid: 'fort31hg' },
+        { email: 'afenkinsergej@gmail.com', uid: '1102' },
+        { email: 'corkinigor@gmail.com', uid: '1101' }
+    ];
+    var current_skaz_account_index = 0;
+
+    var LAMPAUA_UIDS = ['guest'];
+    var current_lampaua_index = 0;
+
+    var BETA_UIDS = [
+        'eis3ey9m',
+        'p8825724-9005-428a-9d86-a466c13ddff3',
+        'y9725724-9005-428a-9d86-a466c13ddcc4'
+    ];
+    var current_beta_index = 0;
+
+    var cf = Lampa.Storage.get('skazonline_servers');
+    var vybor, dd;
+    if (cf == true) {
+        vybor = [
+            'http://onlinecf3.skaz.tv/',
+            'http://onlinecf4.skaz.tv/',
+            'http://onlinecf5.skaz.tv/'
+        ];
+        dd = "cf";
+    } else {
+        vybor = [
+            'http://online3.skaz.tv/',
+            'http://online4.skaz.tv/',
+            'http://online5.skaz.tv/'
+        ];
+        dd = '';
+    }
+    var randomIndex = Math.floor(Math.random() * vybor.length);
+    var randomUrl = vybor[randomIndex];
+
+    function getHost() {
+        if (connection_source === 'showy') return MIRRORS_SHOWY[current_showy_index];
+        if (connection_source === 'okeantv') return 'http://148.135.207.174:12359/';
+        if (connection_source === 'hdpoisk') return 'https://hdpoisk.ru/';
+        if (connection_source === 'lampaua') return 'https://apn2.akter-black.com/http://lampaua.mooo.com/';
+        if (connection_source === 'beta') return 'http://beta.l-vid.online:888/';
+        return randomUrl;
+    }
+
+    var Defined = {
+        api: 'lampac',
+        localhost: getHost(),
+        apn: ''
+    };
+
+    var balansers_with_search;
+
+    function getAndroidVersion() {
+        if (Lampa.Platform.is('android')) {
+            try {
+                var current = AndroidJS.appVersion().split('-');
+                return parseInt(current.pop());
+            } catch (e) { return 0; }
         }
-    });
-
-    setTimeout(scan, 1500);
-    setInterval(scan, 4000);
-
-    if (typeof MutationObserver !== 'undefined') {
-        try {
-            var obs = new MutationObserver(function (muts) {
-                for (var i = 0; i < muts.length; i++) {
-                    var nodes = muts[i].addedNodes;
-                    if (!nodes) continue;
-                    for (var j = 0; j < nodes.length; j++) {
-                        var n = nodes[j];
-                        if (!n || n.nodeType !== 1) continue;
-                        if (n.classList && n.classList.contains('card')) {
-                            var movie = getMovieFromCard(n);
-                            if (movie) decorate(n, movie);
-                        }
-                        if (n.querySelectorAll) {
-                            var inner = n.querySelectorAll('.card');
-                            for (var k = 0; k < inner.length; k++) {
-                                var movie2 = getMovieFromCard(inner[k]);
-                                if (movie2) decorate(inner[k], movie2);
-                            }
-                        }
-                    }
-                }
-            });
-            obs.observe(document.body, { childList: true, subtree: true });
-        } catch (err) {}
+        return 0;
     }
-}
 
-if (window.appready) init();
-else {
-    Lampa.Listener.follow('app', function (e) {
-        if (e.type === 'ready') init();
-    });
-}
-})();
+    var hostkey = 'http://online' + dd + '3.skaz.tv'.replace('http://', '').replace('https://', '');
+
+    if (!window.rch_nws || !window.rch_nws[hostkey]) {
+        if (!window.rch_nws) window.rch_nws = {};
+        window.rch_nws[hostkey] = {
+            type: Lampa.Platform.is('android') ? 'apk' : Lampa.Platform.is('tizen') ? 'cors' : undefined,
+            startTypeInvoke: false,
+            rchRegistry: false,
+            apkVersion: getAndroidVersion()
+        };
+    }
+
+    window.rch_nws[hostkey].typeInvoke = function rchtypeInvoke(host, call) {
+        if (!window.rch_nws[hostkey].startTypeInvoke) {
+            window.rch_nws[hostkey].startTypeInvoke = true;
+            var check = function check(good) {
+                window.rch_nws[hostkey].type = Lampa.Platform.is('android') ? 'apk' : good ? 'cors' : 'web';
+                call();
+            };
+            if (Lampa.Platform.is('android') || Lampa.Platform.is('tizen')) check(true);
+            else {
+                var net = new Lampa.Reguest();
+                net.silent('http://online' + dd + '3.skaz.tv'.indexOf(location.host) >= 0 ? 'https://github.com/' : host + '/cors/check', function() {
+                    check(true);
+                }, function() {
+                    check(false);
+                }, false, { dataType: 'text' });
+            }
+        } else call();
+    };
+
+    window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection) {
+        window.rch_nws[hostkey].typeInvoke('http://online' + dd + '3.skaz.tv', function() {
+            client.invoke("RchRegistry", {
+                version: 154,
+                host: location.host,
+                rchtype: Lampa.Platform.is('android') ? 'apk' : Lampa.Platform.is('tizen') ? 'cors' : (window.rch_nws[hostkey].type || 'web'),
+                apkVersion: window.rch_nws[hostkey].apkVersion,
+                player: Lampa.Storage.field('player'),
+                account_email: getAccountEmail(),
+                unic_id: unic_id,
+                profile_id: Lampa.Storage.get('lampac_profile_id', ''),
+                token: ''
+            });
+
+            if (client._shouldReconnect && window.rch_nws[hostkey].rchRegistry) {
+                if (startConnection) startConnection();
+                return;
+            }
+
+            window.rch_nws[hostkey].rchRegistry = true;
