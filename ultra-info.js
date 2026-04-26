@@ -2,32 +2,72 @@
 'use strict';
 
 window.__ultraInfoCache = window.__ultraInfoCache || {};
+window.__ultraInfoPosterMap = window.__ultraInfoPosterMap || {};
 var STORAGE_KEY = 'ultra_info_cache_v1';
+var POSTER_KEY = 'ultra_info_poster_map_v1';
 var MAX_ENTRIES = 2000;
 
-function loadCache() {
+function loadPersisted() {
     try {
         var raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        var data = JSON.parse(raw);
-        if (data && typeof data === 'object') window.__ultraInfoCache = data;
+        if (raw) {
+            var d = JSON.parse(raw);
+            if (d && typeof d === 'object') window.__ultraInfoCache = d;
+        }
     } catch (e) {}
+    try {
+        var raw2 = localStorage.getItem(POSTER_KEY);
+        if (raw2) {
+            var d2 = JSON.parse(raw2);
+            if (d2 && typeof d2 === 'object') window.__ultraInfoPosterMap = d2;
+        }
+    } catch (e) {}
+}
+
+function trimMap(obj) {
+    var keys = Object.keys(obj);
+    if (keys.length <= MAX_ENTRIES) return obj;
+    var trimmed = {};
+    keys.slice(-MAX_ENTRIES).forEach(function (k) { trimmed[k] = obj[k]; });
+    return trimmed;
 }
 
 function saveCache() {
     try {
-        var keys = Object.keys(window.__ultraInfoCache);
-        if (keys.length > MAX_ENTRIES) {
-            var trimmed = {};
-            keys.slice(-MAX_ENTRIES).forEach(function (k) { trimmed[k] = window.__ultraInfoCache[k]; });
-            window.__ultraInfoCache = trimmed;
-        }
+        window.__ultraInfoCache = trimMap(window.__ultraInfoCache);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(window.__ultraInfoCache));
     } catch (e) {}
 }
 
+function savePosterMap() {
+    try {
+        window.__ultraInfoPosterMap = trimMap(window.__ultraInfoPosterMap);
+        localStorage.setItem(POSTER_KEY, JSON.stringify(window.__ultraInfoPosterMap));
+    } catch (e) {}
+}
+
+function rememberPosters(movie) {
+    if (!movie || !movie.id) return;
+    var changed = false;
+    if (movie.poster_path) {
+        var p = String(movie.poster_path).replace(/^\/+/, '');
+        if (window.__ultraInfoPosterMap[p] !== movie.id) {
+            window.__ultraInfoPosterMap[p] = movie.id;
+            changed = true;
+        }
+    }
+    if (movie.backdrop_path) {
+        var b = String(movie.backdrop_path).replace(/^\/+/, '');
+        if (window.__ultraInfoPosterMap[b] !== movie.id) {
+            window.__ultraInfoPosterMap[b] = movie.id;
+            changed = true;
+        }
+    }
+    if (changed) savePosterMap();
+}
+
 function init() {
-    loadCache();
+    loadPersisted();
 
     if (!document.getElementById('ultra-info-style')) {
         var css =
@@ -117,7 +157,7 @@ function init() {
 
     function applyCardBadges($card, data) {
         if (!$card || !$card.length) return;
-        if ($card.find('.ultra-info-card').length) $card.find('.ultra-info-card').remove();
+        $card.find('.ultra-info-card').remove();
         var badges = buildBadgeList(data);
         if (!badges.length) return;
         var html = '<div class="ultra-info-card">' + badges.map(function (b) {
@@ -131,18 +171,51 @@ function init() {
         $target.append(html);
     }
 
+    function findMovieIdForCard(el) {
+        var $el = $(el);
+        var d = $el.data('card') || $el.data('cardData') || $el.data('movie') || $el.data('card_data');
+        if (d && d.id) return d.id;
+        var attr = el.getAttribute('data-id') || el.getAttribute('data-card-id') || el.getAttribute('data-ultra-info-id');
+        if (attr) return attr;
+        var $img = $el.find('.card__img, img').first();
+        if ($img.length) {
+            var src = $img.attr('src') || $img.attr('data-src') || $img.attr('data-original') || '';
+            var m = src.match(/\/t\/p\/[^/]+\/([^/?#]+\.(?:jpg|jpeg|png|webp))/i);
+            if (m && window.__ultraInfoPosterMap[m[1]]) return window.__ultraInfoPosterMap[m[1]];
+        }
+        return null;
+    }
+
+    function processCard(el) {
+        try {
+            if (!el || el.nodeType !== 1) return;
+            var id = findMovieIdForCard(el);
+            if (!id) return;
+            el.setAttribute('data-ultra-info-id', String(id));
+            var data = window.__ultraInfoCache[id];
+            if (data) applyCardBadges($(el), data);
+        } catch (err) {}
+    }
+
+    function scanAllCards() {
+        var nodes = document.querySelectorAll('.card');
+        for (var i = 0; i < nodes.length; i++) processCard(nodes[i]);
+    }
+
     function decorateCard(e) {
         try {
             var movie = e && (e.object || e.data || e.card_data || e.movie) || {};
-            if (!movie || !movie.id) return;
+            if (movie && movie.id) rememberPosters(movie);
             var $card = $(e.body || e.element || e.card || e.target || []);
             if (!$card.length || !$card.jquery) return;
-            $card.attr('data-ultra-info-id', String(movie.id));
-            var data = window.__ultraInfoCache[movie.id];
-            if (data) applyCardBadges($card, data);
-        } catch (err) {
-            console.log('ULTRA-INFO CARD ERROR', err);
-        }
+            if (movie && movie.id) {
+                $card.attr('data-ultra-info-id', String(movie.id));
+                var data = window.__ultraInfoCache[movie.id];
+                if (data) applyCardBadges($card, data);
+            } else {
+                processCard($card[0]);
+            }
+        } catch (err) {}
     }
 
     function refreshVisibleCards(movieId) {
@@ -151,6 +224,7 @@ function init() {
         $('[data-ultra-info-id="' + movieId + '"]').each(function () {
             applyCardBadges($(this), data);
         });
+        scanAllCards();
     }
 
     function addInfo(e) {
@@ -158,6 +232,7 @@ function init() {
             var movie = (e && e.data && e.data.movie) || (e && e.data) || {};
             if (!movie || !Object.keys(movie).length) return;
             currentMovie = movie;
+            rememberPosters(movie);
 
             var container = $('.full-start-new__details, .full-start__info, .full__info').first();
             if (!container.length) return;
@@ -241,6 +316,7 @@ function init() {
 
     Lampa.Listener.follow('ultra_sources', function (e) {
         if (!e || e.type !== 'loaded' || !e.movie || !e.movie.id) return;
+        rememberPosters(e.movie);
         var detected = detectFromSources(e.items || []);
         var prev = window.__ultraInfoCache[e.movie.id] || {};
         var merged = {
@@ -257,6 +333,30 @@ function init() {
             addInfo({ data: { movie: currentMovie } });
         }
     });
+
+    setTimeout(scanAllCards, 1500);
+    setInterval(scanAllCards, 5000);
+
+    if (typeof MutationObserver !== 'undefined') {
+        try {
+            var observer = new MutationObserver(function (muts) {
+                for (var i = 0; i < muts.length; i++) {
+                    var nodes = muts[i].addedNodes;
+                    if (!nodes) continue;
+                    for (var j = 0; j < nodes.length; j++) {
+                        var n = nodes[j];
+                        if (!n || n.nodeType !== 1) continue;
+                        if (n.classList && n.classList.contains('card')) processCard(n);
+                        if (n.querySelectorAll) {
+                            var inner = n.querySelectorAll('.card');
+                            for (var k = 0; k < inner.length; k++) processCard(inner[k]);
+                        }
+                    }
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        } catch (err) {}
+    }
 }
 
 if (window.appready) init();
