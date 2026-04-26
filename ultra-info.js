@@ -24,9 +24,8 @@
         var token = Lampa.Storage.get('vokino_token', '');
         var tokenDate = Lampa.Storage.get('vokino_token_date', 0);
         var now = Date.now();
-        var maxAge = 24 * 60 * 60 * 1000;
 
-        if (token && (now - tokenDate) < maxAge) {
+        if (token && (now - tokenDate) < 86400000) {
             return Promise.resolve(token);
         }
 
@@ -63,14 +62,14 @@
     function init() {
         function addVoKinoButton(e) {
             try {
-                var container = $('.full-start__buttons, .view--torrent');
+                var container = $('.full-start__buttons');
                 if (!container.length) return;
-                if (container.find('.vokino-button').length) return;
+                if (container.find('.vokino-btn').length) return;
 
-                var movie = e.data.movie || e.data || {};
+                var movie = (e.data && e.data.movie) ? e.data.movie : (e.card || e.movie || {});
                 if (!movie || !movie.title) return;
 
-                var btn = $('<div class="full-start__button selector vokino-button">' +
+                var btn = $('<div class="full-start__button selector vokino-btn">' +
                     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#ff6b6b" width="24" height="24">' +
                     '<path d="M8 5v14l11-7z"/>' +
                     '</svg>' +
@@ -79,25 +78,29 @@
 
                 btn.on('hover:enter', function() {
                     getValidToken().then(function(token) {
+                        var id = Lampa.Utils.hash(movie.number_of_seasons ? movie.original_name : movie.original_title);
+                        var all = Lampa.Storage.get('clarification_search', '{}');
+
                         Lampa.Activity.push({
                             url: '',
-                            title: 'VoKino - ' + (movie.title || movie.name),
-                            component: 'online',
+                            title: 'VoKino - ' + movie.title,
+                            component: 'lampacskaz',
+                            search: all[id] ? all[id] : movie.title,
+                            search_one: movie.title,
+                            search_two: movie.original_title,
                             movie: movie,
                             page: 1,
-                            search: movie.title || movie.name,
-                            clarification: false,
-                            source: 'vokino',
+                            clarification: all[id] ? true : false,
                             vokinotk_token: token
                         });
                     }).catch(function(err) {
-                        Lampa.Noty.show('VoKino: ' + (err.message || 'Ошибка авторизации'));
+                        Lampa.Noty.show('VoKino: ' + err.message);
                     });
                 });
 
                 container.append(btn);
             } catch (err) {
-                console.log('VoKino button error:', err);
+                console.log('VoKino error:', err);
             }
         }
 
@@ -107,18 +110,7 @@
             }
         });
 
-        try {
-            if (Lampa.Activity.active().component === 'full') {
-                var active = Lampa.Activity.active();
-                setTimeout(function() {
-                    addVoKinoButton({
-                        data: { movie: active.card || active.movie || {} }
-                    });
-                }, 500);
-            }
-        } catch (err) {}
-
-        console.log('VoKino плагин активирован ✅');
+        console.log('VoKino плагин готов ✅');
     }
 
     if (window.appready) init();
