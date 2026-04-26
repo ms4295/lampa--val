@@ -51,37 +51,36 @@
     }
 
     function addButton(movie) {
-        console.log('VoKino: пытаюсь добавить кнопку');
-        console.log('VoKino: movie =', movie.title || movie.name);
-
-        var container = document.querySelector('.full-start__buttons');
-        console.log('VoKino: .full-start__buttons =', container);
-
-        if (!container) {
-            container = document.querySelector('.full-start');
-            console.log('VoKino: .full-start =', container);
-        }
-
-        if (!container) {
-            console.log('VoKino: контейнер не найден! Ищем все div на странице...');
+        // Ищем боковое меню (иконки справа от постера)
+        var sideMenu = document.querySelector('.full__actions');
+        if (!sideMenu) sideMenu = document.querySelector('.full-start__actions');
+        if (!sideMenu) sideMenu = document.querySelector('.view--actions');
+        if (!sideMenu) sideMenu = document.querySelector('.card__actions');
+        
+        // Если не нашли — ищем любой контейнер с иконками
+        if (!sideMenu) {
             var allDivs = document.querySelectorAll('div');
-            for (var i = 0; i < Math.min(allDivs.length, 20); i++) {
+            for (var i = 0; i < allDivs.length; i++) {
                 var cls = allDivs[i].className;
-                if (cls && cls.indexOf('button') !== -1) {
-                    console.log('VoKino: найден div с button в классе:', cls);
+                if (cls && (cls.indexOf('actions') !== -1 || cls.indexOf('icons') !== -1)) {
+                    sideMenu = allDivs[i];
+                    break;
                 }
             }
-            return;
         }
 
-        if (container.querySelector('.vokino-btn')) {
-            console.log('VoKino: кнопка уже есть');
-            return;
-        }
+        if (!sideMenu) return;
+        if (sideMenu.querySelector('.vokino-btn')) return;
 
         var btn = document.createElement('div');
-        btn.className = 'full-start__button selector vokino-btn';
-        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#ff6b6b" width="24" height="24"><path d="M8 5v14l11-7z"/></svg><span>VoKino</span>';
+        btn.className = 'vokino-btn';
+        btn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:12px;background:rgba(255,255,255,0.1);cursor:pointer;margin:4px 0;transition:background 0.2s;';
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#ff6b6b" width="24" height="24"><path d="M8 5v14l11-7z"/></svg>';
+        btn.title = 'VoKino';
+
+        btn.onmouseenter = function() { this.style.background = 'rgba(255,107,107,0.3)'; };
+        btn.onmouseleave = function() { this.style.background = 'rgba(255,255,255,0.1)'; };
+
         btn.onclick = function() {
             getValidToken().then(function(token) {
                 var id = Lampa.Utils.hash(movie.number_of_seasons ? movie.original_name : movie.original_title);
@@ -99,20 +98,13 @@
             });
         };
 
-        container.appendChild(btn);
-        console.log('VoKino: кнопка добавлена ✅');
+        sideMenu.appendChild(btn);
     }
 
     function init() {
-        console.log('VoKino: плагин загружен, ждём full');
-
         Lampa.Listener.follow('full', function(e) {
-            console.log('VoKino: событие full, type =', e.type);
-
             if (e.type === 'complite') {
                 var movie = e.data.movie || e.data;
-                console.log('VoKino: complite, movie =', movie);
-
                 setTimeout(function() { addButton(movie); }, 500);
                 setTimeout(function() { addButton(movie); }, 1000);
                 setTimeout(function() { addButton(movie); }, 2000);
