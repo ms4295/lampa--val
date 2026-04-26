@@ -1,137 +1,124 @@
-(function () {
-'use strict';
+// 4K-Film.lol Parser v2.0 for Lampa
+// Автор: Blackbox AI Assistant
+(function() {
+    'use strict';
+    
+    const plugin = {
+        name: '4K-Film.lol',
+        version: '2.0',
+        description: 'Полный парсер 4K фильмов',
+        url: 'https://02.4k-film.lol/',
+        hosts: ['4k-film.lol', '02.4k-film.lol']
+    };
 
-function init() {
-    if (!document.getElementById('ultra-card-style')) {
-        var css =
-            '.ultra-card-info{position:absolute;left:0;right:0;top:0;bottom:0;pointer-events:none;}' +
-            '.ultra-card-top{position:absolute;top:0.4em;right:0.4em;display:flex;flex-direction:column;gap:0.25em;align-items:flex-end;}' +
-            '.ultra-card-bottom{position:absolute;left:0.4em;right:0.4em;bottom:0.4em;display:flex;justify-content:space-between;align-items:flex-end;gap:0.4em;}' +
-            '.ultra-card__badge{display:inline-flex;align-items:center;padding:0.2em 0.55em;color:#fff;font-weight:700;font-size:0.7em;border-radius:0.3em;letter-spacing:0.05em;text-transform:uppercase;box-shadow:0 1px 4px rgba(0,0,0,0.5);}' +
-            '.ultra-card__badge--4k{background:linear-gradient(135deg,#fa709a,#fee140);color:#1a1a1a;}' +
-            '.ultra-card__badge--hdr{background:linear-gradient(135deg,#11998e,#38ef7d);color:#0a2620;}' +
-            '.ultra-card__badge--hdrplus{background:linear-gradient(135deg,#834d9b,#d04ed6);}' +
-            '.ultra-card__chip{display:inline-flex;align-items:center;padding:0.25em 0.55em;font-weight:700;font-size:0.78em;border-radius:0.3em;color:#fff;background:rgba(0,0,0,0.65);box-shadow:0 1px 3px rgba(0,0,0,0.5);}' +
-            '.ultra-card__chip--rate{background:linear-gradient(135deg,#f7971e,#ffd200);color:#1a1a1a;}';
-        var style = document.createElement('style');
-        style.id = 'ultra-card-style';
-        style.textContent = css;
-        document.head.appendChild(style);
-    }
-
-    function getMovieFromCard(el) {
-        var $el = $(el);
-        var d = $el.data('card') || $el.data('cardData') || $el.data('movie') || $el.data('card_data');
-        if (d && (d.id || d.title || d.name)) return d;
-        return null;
-    }
-
-    function decorate(el, movie) {
-        try {
-            if (!el || !movie) return;
-            var $card = $(el);
-            if ($card.find('.ultra-card-info').length) return;
-
-            var year = '';
-            var date = movie.release_date || movie.first_air_date || movie.year || '';
-            if (date) year = String(date).substring(0, 4);
-
-            var rate = '';
-            if (movie.vote_average && Number(movie.vote_average) > 0) {
-                rate = Number(movie.vote_average).toFixed(1);
-            }
-
-            var bag = [
-                movie.title, movie.original_title,
-                movie.name, movie.original_name,
-                movie.quality, movie.overview, movie.tagline
-            ].filter(Boolean).join(' ').toLowerCase();
-
-            var has4k = /\b(4k|2160p?|uhd|ultra\s*hd)\b/.test(bag);
-            var hasHdrPlus = /hdr10\s*\+|hdr\s*\+|hdr\s*plus/.test(bag);
-            var hasHdr = !hasHdrPlus && /\bhdr\b|hdr10/.test(bag);
-
-            var top = [];
-            if (has4k)      top.push('<span class="ultra-card__badge ultra-card__badge--4k">4K</span>');
-            if (hasHdrPlus) top.push('<span class="ultra-card__badge ultra-card__badge--hdrplus">HDR+</span>');
-            else if (hasHdr) top.push('<span class="ultra-card__badge ultra-card__badge--hdr">HDR</span>');
-
-            var bottom = [];
-            if (rate) bottom.push('<span class="ultra-card__chip ultra-card__chip--rate">' + rate + '</span>');
-            else bottom.push('<span></span>');
-            if (year) bottom.push('<span class="ultra-card__chip ultra-card__chip--year">' + year + '</span>');
-
-            var hasContent = top.length || rate || year;
-            if (!hasContent) return;
-
-            var html = '<div class="ultra-card-info">';
-            if (top.length)    html += '<div class="ultra-card-top">'    + top.join('')    + '</div>';
-            if (bottom.length) html += '<div class="ultra-card-bottom">' + bottom.join('') + '</div>';
-            html += '</div>';
-
-            var $target = $card.find('.card__view').first();
-            if (!$target.length) $target = $card.find('.card__img').parent().first();
-            if (!$target.length) $target = $card;
-            var pos = $target.css('position');
-            if (!pos || pos === 'static') $target.css('position', 'relative');
-            $target.append(html);
-        } catch (err) {}
-    }
-
-    function scan() {
-        try {
-            var nodes = document.querySelectorAll('.card');
-            for (var i = 0; i < nodes.length; i++) {
-                var el = nodes[i];
-                if ($(el).find('.ultra-card-info').length) continue;
-                var movie = getMovieFromCard(el);
-                if (movie) decorate(el, movie);
-            }
-        } catch (err) {}
-    }
-
-    Lampa.Listener.follow('card', function (e) {
-        if (e.type !== 'build') return;
-        var movie = e.object || e.data || e.card_data || {};
-        var $el = $(e.body || e.element || e.card || []);
-        if ($el.length && movie) decorate($el[0], movie);
-    });
-
-    setTimeout(scan, 1500);
-    setInterval(scan, 4000);
-
-    if (typeof MutationObserver !== 'undefined') {
-        try {
-            var obs = new MutationObserver(function (muts) {
-                for (var i = 0; i < muts.length; i++) {
-                    var nodes = muts[i].addedNodes;
-                    if (!nodes) continue;
-                    for (var j = 0; j < nodes.length; j++) {
-                        var n = nodes[j];
-                        if (!n || n.nodeType !== 1) continue;
-                        if (n.classList && n.classList.contains('card')) {
-                            var movie = getMovieFromCard(n);
-                            if (movie) decorate(n, movie);
-                        }
-                        if (n.querySelectorAll) {
-                            var inner = n.querySelectorAll('.card');
-                            for (var k = 0; k < inner.length; k++) {
-                                var movie2 = getMovieFromCard(inner[k]);
-                                if (movie2) decorate(inner[k], movie2);
-                            }
-                        }
+    // Главная страница / Каталог
+    function parseMain(url) {
+        return networks.silent(url, function(html) {
+            let items = [];
+            let parsed = html.match(/<div class="post-item[^>]*>([\s\S]*?)<\/div>/gi) || [];
+            
+            parsed.forEach(block => {
+                let titleMatch = block.match(/<h3[^>]*>([^<]+)<\/h3>/i);
+                let hrefMatch = block.match(/href="([^"]+)"/i);
+                let imgMatch = block.match(/src="([^"]+\.(jpg|png|webp))"/i);
+                
+                if (titleMatch && hrefMatch) {
+                    let title = titleMatch[1].trim();
+                    let href = hrefMatch[1];
+                    let img = imgMatch ? imgMatch[1] : '';
+                    
+                    // 4K маркер
+                    if (title.match(/4K|UHD|2160p/i) || block.match(/4K|UHD/i)) {
+                        title += ' [4K]';
                     }
+                    
+                    items.push({
+                        title: title,
+                        href: href.startsWith('http') ? href : plugin.url + href,
+                        img: img || './img/img_broken.svg'
+                    });
                 }
             });
-            obs.observe(document.body, { childList: true, subtree: true });
-        } catch (err) {}
+            
+            return items;
+        });
     }
-}
 
-if (window.appready) init();
-else {
-    Lampa.Listener.follow('app', function (e) {
-        if (e.type === 'ready') init();
+    // Страница фильма
+    function parseCard(url) {
+        return networks.silent(url, function(html) {
+            let data = {
+                title: $('h1', html).text().trim() || '',
+                original_title: $('.original-title', html).text().trim() || '',
+                img: $('.poster img', html).attr('src') || '',
+                description: $('.description', html).text().trim() || '',
+                year: parseInt($('.year', html).text()) || 0,
+                rating: parseFloat($('.rating', html).text()) || 0,
+                playlist: []
+            };
+
+            // Ищем плееры 4K
+            let iframes = html.match(/<iframe[^>]+src="([^"]+)"[^>]*>/gi);
+            if (iframes) {
+                iframes.forEach(iframe => {
+                    let src = iframe.match(/src="([^"]+)"/)[1];
+                    if (src.includes('4k') || src.includes('2160')) {
+                        data.playlist.push({
+                            quality: '4K',
+                            url: src,
+                            timeline: 0
+                        });
+                    }
+                });
+            }
+            
+            return data;
+        });
+    }
+
+    // Поиск
+    function search(query) {
+        let url = `${plugin.url}search/?q=${encodeURIComponent(query)}`;
+        return parseMain(url);
+    }
+
+    // Регистрация плагина
+    Lampa.Plugins.call({
+        name: plugin.name,
+        start: function() {
+            // Добавляем в каталог
+            Lampa.Template.add('catalog', {
+                title: plugin.name,
+                href: plugin.url,
+                content: 'online'
+            });
+
+            // Главная страница
+            Lampa.Template.add('online', {
+                href: plugin.url,
+                handler: 'catalog',
+                parse: parseMain
+            });
+
+            // Карточка фильма
+            Lampa.Listener.follow('full', function(e) {
+                if (e.type === 'complite' && e.url.includes(plugin.hosts[0])) {
+                    parseCard(e.url).then(data => {
+                        e.data = data;
+                        Lampa.Controller.toggle('full_start');
+                    });
+                }
+            });
+
+            // Кнопка в меню
+            Lampa.Template.add('button_catalog', {
+                name: plugin.name,
+                html: `<div class="selector focus" data-href="${plugin.url}">
+                    <div class="selector__title">${plugin.name}</div>
+                    <div class="selector__quality">4K</div>
+                </div>`
+            });
+        }
     });
-}
+
 })();
