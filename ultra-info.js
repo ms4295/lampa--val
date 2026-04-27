@@ -3,20 +3,15 @@
 
     var token = '';
     var tokenDate = 0;
-    var login = '';
-    var password = '';
     var currentMovie = null;
 
     function getToken() {
         return new Promise(function(resolve, reject) {
             var now = Date.now();
-            if (token && (now - tokenDate) < 86400000) {
-                resolve(token);
-                return;
-            }
+            if (token && (now - tokenDate) < 86400000) { resolve(token); return; }
 
-            if (!login) login = Lampa.Storage.get('vokino_login', '');
-            if (!password) password = Lampa.Storage.get('vokino_password', '');
+            var login = Lampa.Storage.get('vokino_login', '');
+            var password = Lampa.Storage.get('vokino_password', '');
 
             if (login && password) {
                 fetchToken(login, password).then(resolve).catch(function() {
@@ -30,26 +25,18 @@
 
     function fetchToken(l, p) {
         return new Promise(function(resolve, reject) {
-            var r = new Lampa.Reguest();
-            r.timeout(10000);
-            r.silent(
+            Lampa.Reguest().silent(
                 'http://148.135.207.174:12359/lite/vokinotk?login=' + encodeURIComponent(l) + '&password=' + encodeURIComponent(p),
-                function(resp) {
-                    if (resp && resp.token) {
-                        token = resp.token;
-                        tokenDate = Date.now();
-                        login = l;
-                        password = p;
+                function(r) {
+                    if (r && r.token) {
+                        token = r.token; tokenDate = Date.now();
                         Lampa.Storage.set('vokino_login', l);
                         Lampa.Storage.set('vokino_password', p);
                         resolve(token);
-                    } else {
-                        reject(new Error('Неверный ответ сервера'));
-                    }
+                    } else { reject(new Error('Неверный ответ')); }
                 },
                 function() { reject(new Error('Сервер недоступен')); },
-                false,
-                { dataType: 'json' }
+                false, { dataType: 'json' }
             );
         });
     }
@@ -58,139 +45,99 @@
         Lampa.Prompt.show({
             title: 'VoKino — вход',
             fields: [
-                { name: 'login', type: 'text', placeholder: 'Логин или email' },
+                { name: 'login', type: 'text', placeholder: 'Логин' },
                 { name: 'password', type: 'password', placeholder: 'Пароль' }
             ],
             onResult: function(r) {
                 if (r && r.login && r.password) {
-                    fetchToken(r.login, r.password).then(resolve).catch(function(err) {
-                        Lampa.Noty.show('Ошибка: ' + err.message);
-                        reject(err);
+                    fetchToken(r.login, r.password).then(resolve).catch(function(e) {
+                        Lampa.Noty.show(e.message); reject(e);
                     });
-                } else {
-                    reject(new Error('Отменено'));
-                }
+                } else { reject(new Error('Отмена')); }
             },
-            onBack: function() { reject(new Error('Отменено')); }
+            onBack: function() { reject(new Error('Отмена')); }
         });
     }
 
-    function searchAndPlay() {
-        if (!currentMovie || !currentMovie.title) {
-            Lampa.Noty.show('Нет данных о фильме');
-            return;
-        }
-
+    function searchVoKino() {
+        if (!currentMovie) return;
         Lampa.Loading.start();
 
         getToken().then(function(tok) {
-            var title = currentMovie.title || currentMovie.name || '';
-            var url = 'http://148.135.207.174:12359/lite/vokino?title=' + encodeURIComponent(title) + '&vokinotk_token=' + tok;
-
-            var r = new Lampa.Reguest();
-            r.timeout(15000);
-            r.silent(url, function(json) {
+            var url = 'http://148.135.207.174:12359/lite/vokino?title=' + encodeURIComponent(currentMovie.title || currentMovie.name) + '&vokinotk_token=' + tok;
+            Lampa.Reguest().silent(url, function(json) {
                 Lampa.Loading.stop();
-
                 if (!json || !json.online || !json.online.length) {
-                    Lampa.Noty.show('VoKino: ничего не найдено');
+                    Lampa.Noty.show('Ничего не найдено');
                     return;
                 }
-
-                var sources = [];
-                for (var i = 0; i < json.online.length; i++) {
-                    if (json.online[i].show !== false && json.online[i].url) {
-                        sources.push(json.online[i]);
-                    }
-                }
-
-                if (!sources.length) {
-                    Lampa.Noty.show('VoKino: нет источников');
-                    return;
-                }
-
-                if (sources.length === 1) {
-                    playSource(sources[0]);
-                } else {
-                    var items = [];
-                    for (var j = 0; j < sources.length; j++) {
-                        items.push({
-                            title: sources[j].name || sources[j].title || ('Источник ' + (j + 1)),
-                            src: sources[j]
-                        });
-                    }
-                    Lampa.Select.show({
-                        title: 'VoKino — выбор',
-                        items: items,
-                        onSelect: function(item) {
-                            Lampa.Select.close();
-                            playSource(item.src);
-                        },
-                        onBack: function() { Lampa.Select.close(); }
-                    });
-                }
+                showResults(json.online);
             }, function() {
                 Lampa.Loading.stop();
-                Lampa.Noty.show('VoKino: ошибка поиска');
+                Lampa.Noty.show('Ошибка поиска');
             }, false, { dataType: 'json' });
-        }).catch(function(err) {
+        }).catch(function(e) {
             Lampa.Loading.stop();
-            if (err.message !== 'Отменено') {
-                Lampa.Noty.show('VoKino: ' + err.message);
+            if (e.message !== 'Отмена') Lampa.Noty.show(e.message);
+        });
+    }
+
+    function showResults(sources) {
+        var items = [];
+        for (var i = 0; i < sources.length; i++) {
+            var s = sources[i];
+            if (!s.url) continue;
+            var name = s.name || s.title || s.quality || ('Источник ' + (i + 1));
+            items.push({ title: name, url: s.url });
+        }
+        if (!items.length) { Lampa.Noty.show('Нет доступных ссылок'); return; }
+
+        Lampa.Select.show({
+            title: 'VoKino — результаты',
+            items: items,
+            onSelect: function(item) {
+                Lampa.Select.close();
+                playUrl(item.url);
             }
         });
     }
 
-    function playSource(source) {
+    function playUrl(url) {
         Lampa.Loading.start();
-        var r = new Lampa.Reguest();
-        r.timeout(10000);
-        r.silent(source.url, function(json) {
+        Lampa.Reguest().silent(url, function(json) {
             Lampa.Loading.stop();
-            var videoUrl = (json && json.url) ? json.url : source.url;
-            Lampa.Player.play({
-                title: currentMovie.title || currentMovie.name || 'VoKino',
-                url: videoUrl,
-                isonline: true,
-                iptv: true
-            });
+            var video = (json && json.url) ? json.url : url;
+            Lampa.Player.play({ title: currentMovie.title || 'VoKino', url: video, isonline: true });
         }, function() {
             Lampa.Loading.stop();
-            Lampa.Noty.show('Ошибка загрузки ссылки');
+            Lampa.Noty.show('Ошибка получения видео');
         }, false, { dataType: 'json' });
     }
 
     function createButton(movie) {
         if (!movie || !movie.title) return;
         currentMovie = movie;
-
-        // Удаляем старую кнопку если есть
-        var old = document.getElementById('vokino-float-btn');
+        var old = document.getElementById('vokino-btn');
         if (old) old.remove();
 
         var btn = document.createElement('div');
-        btn.id = 'vokino-float-btn';
-        btn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;width:56px;height:56px;border-radius:50%;background:#ff4444;color:white;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 15px rgba(255,68,68,0.5);font-size:24px;';
+        btn.id = 'vokino-btn';
+        btn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;width:56px;height:56px;border-radius:50%;background:#e53935;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;box-shadow:0 2px 10px rgba(229,57,53,0.5);';
         btn.innerHTML = '▶';
-        btn.title = 'VoKino (платный)';
-        btn.onclick = searchAndPlay;
-
+        btn.onclick = searchVoKino;
         document.body.appendChild(btn);
     }
 
     function init() {
         Lampa.Listener.follow('full', function(e) {
             if (e.type === 'complite') {
-                var movie = e.data.movie || e.data;
-                setTimeout(function() { createButton(movie); }, 500);
+                setTimeout(function() { createButton(e.data.movie || e.data); }, 600);
             }
         });
-
-        // Убираем кнопку при уходе из карточки
         Lampa.Listener.follow('activity', function(e) {
             if (e.type === 'back') {
-                var btn = document.getElementById('vokino-float-btn');
-                if (btn) btn.remove();
+                var b = document.getElementById('vokino-btn');
+                if (b) b.remove();
                 currentMovie = null;
             }
         });
