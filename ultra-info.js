@@ -2,13 +2,11 @@
     'use strict';
 
     var token = '';
-    var tokenDate = 0;
     var currentMovie = null;
 
     function getToken() {
         return new Promise(function(resolve, reject) {
-            var now = Date.now();
-            if (token && (now - tokenDate) < 86400000) { resolve(token); return; }
+            if (token) { resolve(token); return; }
 
             var login = Lampa.Storage.get('vokino_login', '');
             var password = Lampa.Storage.get('vokino_password', '');
@@ -25,98 +23,94 @@
 
     function fetchToken(l, p) {
         return new Promise(function(resolve, reject) {
-            Lampa.Reguest().silent(
-                'http://148.135.207.174:12359/lite/vokinotk?login=' + encodeURIComponent(l) + '&password=' + encodeURIComponent(p),
-                function(r) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'http://148.135.207.174:12359/lite/vokinotk?login=' + encodeURIComponent(l) + '&password=' + encodeURIComponent(p), true);
+            xhr.timeout = 10000;
+            xhr.onload = function() {
+                try {
+                    var r = JSON.parse(xhr.responseText);
                     if (r && r.token) {
-                        token = r.token; tokenDate = Date.now();
+                        token = r.token;
                         Lampa.Storage.set('vokino_login', l);
                         Lampa.Storage.set('vokino_password', p);
                         resolve(token);
-                    } else { reject(new Error('Неверный ответ')); }
-                },
-                function() { reject(new Error('Сервер недоступен')); },
-                false, { dataType: 'json' }
-            );
+                    } else {
+                        reject(new Error('Неверный логин или пароль'));
+                    }
+                } catch(e) {
+                    reject(new Error('Ошибка ответа сервера'));
+                }
+            };
+            xhr.onerror = function() { reject(new Error('Сервер недоступен')); };
+            xhr.ontimeout = function() { reject(new Error('Таймаут')); };
+            xhr.send();
         });
     }
 
     function askCredentials(resolve, reject) {
-        Lampa.Prompt.show({
-            title: 'VoKino — вход',
-            fields: [
-                { name: 'login', type: 'text', placeholder: 'Логин' },
-                { name: 'password', type: 'password', placeholder: 'Пароль' }
-            ],
-            onResult: function(r) {
-                if (r && r.login && r.password) {
-                    fetchToken(r.login, r.password).then(resolve).catch(function(e) {
-                        Lampa.Noty.show(e.message); reject(e);
-                    });
-                } else { reject(new Error('Отмена')); }
-            },
-            onBack: function() { reject(new Error('Отмена')); }
+        // Простое окно через prompt (без Lampa API)
+        var login = prompt('VoKino — введите логин или email:');
+        if (!login) { reject(new Error('Отмена')); return; }
+        var password = prompt('VoKino — введите пароль:');
+        if (!password) { reject(new Error('Отмена')); return; }
+
+        fetchToken(login, password).then(resolve).catch(function(err) {
+            alert('Ошибка: ' + err.message);
+            reject(err);
         });
     }
 
     function searchVoKino() {
         if (!currentMovie) return;
-        Lampa.Loading.start();
 
         getToken().then(function(tok) {
-            var url = 'http://148.135.207.174:12359/lite/vokino?title=' + encodeURIComponent(currentMovie.title || currentMovie.name) + '&vokinotk_token=' + tok;
-            Lampa.Reguest().silent(url, function(json) {
-                Lampa.Loading.stop();
-                if (!json || !json.online || !json.online.length) {
-                    Lampa.Noty.show('Ничего не найдено');
-                    return;
+            var title = currentMovie.title || currentMovie.name || '';
+            var url = 'http://148.135.207.174:12359/lite/vokino?title=' + encodeURIComponent(title) + '&vokinotk_token=' + tok;
+
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', url, true);
+            xhr.timeout = 15000;
+            xhr.onload = function() {
+                try {
+                    var json = JSON.parse(xhr.responseText);
+                    if (!json || !json.online || !json.online.length) {
+                        alert('VoKino: ничего не найдено');
+                        return;
+                    }
+                    showResults(json.online);
+                } catch(e) {
+                    alert('Ошибка обработки ответа');
                 }
-                showResults(json.online);
-            }, function() {
-                Lampa.Loading.stop();
-                Lampa.Noty.show('Ошибка поиска');
-            }, false, { dataType: 'json' });
-        }).catch(function(e) {
-            Lampa.Loading.stop();
-            if (e.message !== 'Отмена') Lampa.Noty.show(e.message);
+            };
+            xhr.onerror = function() { alert('Ошибка поиска'); };
+            xhr.ontimeout = function() { alert('Таймаут поиска'); };
+            xhr.send();
+        }).catch(function(err) {
+            if (err.message !== 'Отмена') alert('VoKino: ' + err.message);
         });
     }
 
     function showResults(sources) {
-        var items = [];
+        // Строим простой список ссылок
+        var html = '<div style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,0.95);overflow-y:auto;padding:20px;">';
+        html += '<h2 style="color:#fff;margin-bottom:20px;">VoKino — результаты</h2>';
+        html += '<button onclick="this.parentElement.remove()" style="position:absolute;top:10px;right:10px;background:#e53935;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">Закрыть</button>';
+
         for (var i = 0; i < sources.length; i++) {
             var s = sources[i];
             if (!s.url) continue;
-            var name = s.name || s.title || s.quality || ('Источник ' + (i + 1));
-            items.push({ title: name, url: s.url });
+            var name = s.name || s.title || ('Источник ' + (i + 1));
+            html += '<div style="background:#222;color:#fff;padding:12px;margin:8px 0;border-radius:6px;cursor:pointer;" onclick="var v=document.createElement(\'video\');v.src=\'' + s.url + '\';v.controls=true;v.autoplay=true;v.style.cssText=\'position:fixed;top:0;left:0;width:100%;height:100%;z-index:999999;background:#000;\';document.body.appendChild(v);this.parentElement.remove();">' + name + '</div>';
         }
-        if (!items.length) { Lampa.Noty.show('Нет доступных ссылок'); return; }
 
-        Lampa.Select.show({
-            title: 'VoKino — результаты',
-            items: items,
-            onSelect: function(item) {
-                Lampa.Select.close();
-                playUrl(item.url);
-            }
-        });
-    }
-
-    function playUrl(url) {
-        Lampa.Loading.start();
-        Lampa.Reguest().silent(url, function(json) {
-            Lampa.Loading.stop();
-            var video = (json && json.url) ? json.url : url;
-            Lampa.Player.play({ title: currentMovie.title || 'VoKino', url: video, isonline: true });
-        }, function() {
-            Lampa.Loading.stop();
-            Lampa.Noty.show('Ошибка получения видео');
-        }, false, { dataType: 'json' });
+        html += '</div>';
+        document.body.insertAdjacentHTML('beforeend', html);
     }
 
     function createButton(movie) {
         if (!movie || !movie.title) return;
         currentMovie = movie;
+
         var old = document.getElementById('vokino-btn');
         if (old) old.remove();
 
@@ -131,9 +125,12 @@
     function init() {
         Lampa.Listener.follow('full', function(e) {
             if (e.type === 'complite') {
-                setTimeout(function() { createButton(e.data.movie || e.data); }, 600);
+                setTimeout(function() {
+                    createButton(e.data.movie || e.data);
+                }, 600);
             }
         });
+
         Lampa.Listener.follow('activity', function(e) {
             if (e.type === 'back') {
                 var b = document.getElementById('vokino-btn');
