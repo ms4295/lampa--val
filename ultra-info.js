@@ -5,24 +5,21 @@
     var tokenDate = 0;
     var login = '';
     var password = '';
+    var currentMovie = null;
 
     function getToken() {
         return new Promise(function(resolve, reject) {
             var now = Date.now();
-            
-            // Если токен ещё свежий (меньше суток)
             if (token && (now - tokenDate) < 86400000) {
                 resolve(token);
                 return;
             }
 
-            // Если есть сохранённые логин и пароль
             if (!login) login = Lampa.Storage.get('vokino_login', '');
             if (!password) password = Lampa.Storage.get('vokino_password', '');
 
             if (login && password) {
                 fetchToken(login, password).then(resolve).catch(function() {
-                    // Если сохранённые данные не подошли — просим новые
                     askCredentials(resolve, reject);
                 });
             } else {
@@ -78,11 +75,16 @@
         });
     }
 
-    function searchAndPlay(movie) {
+    function searchAndPlay() {
+        if (!currentMovie || !currentMovie.title) {
+            Lampa.Noty.show('Нет данных о фильме');
+            return;
+        }
+
         Lampa.Loading.start();
 
         getToken().then(function(tok) {
-            var title = movie.title || movie.name || '';
+            var title = currentMovie.title || currentMovie.name || '';
             var url = 'http://148.135.207.174:12359/lite/vokino?title=' + encodeURIComponent(title) + '&vokinotk_token=' + tok;
 
             var r = new Lampa.Reguest();
@@ -95,27 +97,38 @@
                     return;
                 }
 
-                // Пропускаем источники с show === false
                 var sources = [];
                 for (var i = 0; i < json.online.length; i++) {
-                    var s = json.online[i];
-                    if (s.show !== false && s.url) {
-                        sources.push(s);
+                    if (json.online[i].show !== false && json.online[i].url) {
+                        sources.push(json.online[i]);
                     }
                 }
 
                 if (!sources.length) {
-                    Lampa.Noty.show('VoKino: нет доступных источников');
+                    Lampa.Noty.show('VoKino: нет источников');
                     return;
                 }
 
-                // Если есть несколько — даём выбрать
                 if (sources.length === 1) {
-                    playSource(sources[0], movie);
+                    playSource(sources[0]);
                 } else {
-                    showSourceMenu(sources, movie);
+                    var items = [];
+                    for (var j = 0; j < sources.length; j++) {
+                        items.push({
+                            title: sources[j].name || sources[j].title || ('Источник ' + (j + 1)),
+                            src: sources[j]
+                        });
+                    }
+                    Lampa.Select.show({
+                        title: 'VoKino — выбор',
+                        items: items,
+                        onSelect: function(item) {
+                            Lampa.Select.close();
+                            playSource(item.src);
+                        },
+                        onBack: function() { Lampa.Select.close(); }
+                    });
                 }
-
             }, function() {
                 Lampa.Loading.stop();
                 Lampa.Noty.show('VoKino: ошибка поиска');
@@ -128,93 +141,57 @@
         });
     }
 
-    function showSourceMenu(sources, movie) {
-        var items = [];
-        for (var i = 0; i < sources.length; i++) {
-            var s = sources[i];
-            var label = 'Источник ' + (i + 1);
-            if (s.name) label = s.name;
-            if (s.title) label = s.title;
-            items.push({
-                title: label,
-                source: s,
-                movie: movie
-            });
-        }
-
-        Lampa.Select.show({
-            title: 'VoKino — выбор источника',
-            items: items,
-            onSelect: function(item) {
-                Lampa.Select.close();
-                playSource(item.source, item.movie);
-            },
-            onBack: function() {
-                Lampa.Select.close();
-            }
-        });
-    }
-
-    function playSource(source, movie) {
+    function playSource(source) {
         Lampa.Loading.start();
-
-        var playUrl = source.url;
         var r = new Lampa.Reguest();
         r.timeout(10000);
-        r.silent(playUrl, function(json) {
+        r.silent(source.url, function(json) {
             Lampa.Loading.stop();
-
-            var videoUrl = '';
-            if (json && json.url) {
-                videoUrl = json.url;
-            } else if (json && typeof json === 'string') {
-                videoUrl = json;
-            } else {
-                videoUrl = playUrl;
-            }
-
-            if (videoUrl) {
-                Lampa.Player.play({
-                    title: movie.title || movie.name || 'VoKino',
-                    url: videoUrl,
-                    isonline: true,
-                    iptv: true
-                });
-            } else {
-                Lampa.Noty.show('Не удалось получить ссылку');
-            }
+            var videoUrl = (json && json.url) ? json.url : source.url;
+            Lampa.Player.play({
+                title: currentMovie.title || currentMovie.name || 'VoKino',
+                url: videoUrl,
+                isonline: true,
+                iptv: true
+            });
         }, function() {
             Lampa.Loading.stop();
-            Lampa.Noty.show('Ошибка загрузки');
+            Lampa.Noty.show('Ошибка загрузки ссылки');
         }, false, { dataType: 'json' });
     }
 
-    function addButton(movie) {
-        // Ищем контейнер с иконками действий
-        var container = document.querySelector('.full-start__actions');
-        if (!container) container = document.querySelector('.full__actions');
-        if (!container) container = document.querySelector('.card__actions');
-        if (!container) return;
-        if (container.querySelector('.vokino-btn')) return;
+    function createButton(movie) {
+        if (!movie || !movie.title) return;
+        currentMovie = movie;
+
+        // Удаляем старую кнопку если есть
+        var old = document.getElementById('vokino-float-btn');
+        if (old) old.remove();
 
         var btn = document.createElement('div');
-        btn.className = 'vokino-btn';
-        btn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:12px;background:rgba(255,255,255,0.1);cursor:pointer;margin:4px 0;';
-        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#ff6b6b" width="24" height="24"><path d="M8 5v14l11-7z"/></svg>';
+        btn.id = 'vokino-float-btn';
+        btn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;width:56px;height:56px;border-radius:50%;background:#ff4444;color:white;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 15px rgba(255,68,68,0.5);font-size:24px;';
+        btn.innerHTML = '▶';
         btn.title = 'VoKino (платный)';
-        btn.onclick = function() { searchAndPlay(movie); };
+        btn.onclick = searchAndPlay;
 
-        container.appendChild(btn);
+        document.body.appendChild(btn);
     }
 
     function init() {
         Lampa.Listener.follow('full', function(e) {
             if (e.type === 'complite') {
                 var movie = e.data.movie || e.data;
-                if (movie && movie.title) {
-                    setTimeout(function() { addButton(movie); }, 600);
-                    setTimeout(function() { addButton(movie); }, 1200);
-                }
+                setTimeout(function() { createButton(movie); }, 500);
+            }
+        });
+
+        // Убираем кнопку при уходе из карточки
+        Lampa.Listener.follow('activity', function(e) {
+            if (e.type === 'back') {
+                var btn = document.getElementById('vokino-float-btn');
+                if (btn) btn.remove();
+                currentMovie = null;
             }
         });
     }
