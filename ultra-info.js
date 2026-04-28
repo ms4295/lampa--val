@@ -23,8 +23,7 @@
         var scroll = new Lampa.Scroll({ mask: true, over: true });
         var files = new Lampa.Explorer(object);
         var filter = new Lampa.Filter(object);
-        var sources = {};
-        var last, source, balanser, initialized, balanser_timer, images = [];
+        var sources = {}, last, source, balanser, initialized, balanser_timer, images = [];
         var number_of_requests = 0, number_of_requests_timer;
         var life_wait_times = 0, life_wait_timer;
         var filter_sources = {};
@@ -35,23 +34,12 @@
         this.initialize = function() {
             var _this = this;
             this.loading(true);
-            filter.onSearch = function(value) {
-                var id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
-                var all = Lampa.Storage.get('clarification_search', '{}');
-                all[id] = value;
-                Lampa.Storage.set('clarification_search', all);
-                Lampa.Activity.replace({ search: value, clarification: true, similar: true });
-            };
             filter.onBack = function() { _this.start(); };
             filter.render().find('.selector').on('hover:enter', function() { clearInterval(balanser_timer); });
             filter.render().find('.filter--search').appendTo(filter.render().find('.torrent-filter'));
             filter.onSelect = function(type, a, b) {
                 if (type == 'filter') {
                     if (a.reset) {
-                        var id = Lampa.Utils.hash(object.movie.number_of_seasons ? object.movie.original_name : object.movie.original_title);
-                        var all = Lampa.Storage.get('clarification_search', '{}');
-                        delete all[id];
-                        Lampa.Storage.set('clarification_search', all);
                         _this.replaceChoice({ season: 0, voice: 0, voice_url: '', voice_name: '' });
                         setTimeout(function() { Lampa.Select.close(); Lampa.Activity.replace({ clarification: 0, similar: 0 }); }, 10);
                     } else {
@@ -70,8 +58,7 @@
                     _this.changeBalanser(a.source);
                 }
             };
-            if (filter.addButtonBack) filter.addButtonBack();
-            filter.render().find('.filter--sort span').text(Lampa.Lang.translate('lampac_balanser'));
+            filter.render().find('.filter--sort span').text('Источник');
             scroll.body().addClass('torrent-list');
             files.appendFiles(scroll.render());
             files.appendHead(filter.render());
@@ -80,13 +67,26 @@
             Lampa.Controller.enable('content');
             this.loading(false);
 
-            this.externalids().then(function() {
-                return _this.createSource();
-            }).then(function(json) {
+            this.createSource().then(function(json) {
                 _this.search();
             })["catch"](function(e) {
-                _this.noConnectToServer(e);
+                scroll.clear();
+                scroll.append('<div style="color:#fff;text-align:center;padding:2em;">Сервер недоступен</div>');
+                _this.loading(false);
             });
+        };
+
+        this.requestParams = function(url) {
+            var query = [];
+            query.push('id=' + encodeURIComponent(object.movie.id));
+            if (object.movie.imdb_id) query.push('imdb_id=' + object.movie.imdb_id);
+            if (object.movie.kinopoisk_id) query.push('kinopoisk_id=' + object.movie.kinopoisk_id);
+            query.push('title=' + encodeURIComponent(object.movie.title || object.movie.name));
+            query.push('original_title=' + encodeURIComponent(object.movie.original_title || object.movie.original_name));
+            query.push('serial=' + (object.movie.name ? 1 : 0));
+            query.push('year=' + ((object.movie.release_date || object.movie.first_air_date || '0000') + '').slice(0, 4));
+            query.push('source=' + (object.movie.source || 'tmdb'));
+            return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
         };
 
         this.createSource = function() {
@@ -95,37 +95,142 @@
                 var url = _this.requestParams(host + 'lite/events?life=true');
                 network.timeout(15000);
                 network.silent(account(url), function(json) {
-                    if (json.life) {
-                        _this.memkey = json.memkey;
-                        filter.render().find('.filter--sort').append('<span class="lampac-balanser-loader" style="width:1.2em;height:1.2em;margin-top:0;background:url(./img/loader.svg) no-repeat 50% 50%;background-size:contain;margin-left:0.5em"></span>');
-                        _this.lifeSource().then(_this.startSource).then(resolve)["catch"](reject);
-                    } else {
-                        _this.startSource(json).then(resolve)["catch"](reject);
+                    if (!json || !json.online) {
+                        reject('empty');
+                        return;
                     }
-                }, reject, false, { headers: addHeaders() });
+                    var list = json.online.filter(function(j) { return j.show !== false; });
+                    list.forEach(function(j) {
+                        var name = balanserName(j);
+                        sources[name] = { url: j.url, name: j.name };
+                    });
+                    filter_sources = Object.keys(sources);
+                    if (filter_sources.length) {
+                        balanser = filter_sources[0];
+                        source = sources[balanser].url;
+                        resolve(json);
+                    } else {
+                        reject('no sources');
+                    }
+                }, function() { reject('network error'); }, false, { headers: addHeaders() });
             });
         };
 
-        this.search = function() { this.filter({ source: filter_sources }, this.getChoice()); this.find(); };
-        this.find = function() { this.request(this.requestParams(source)); };
+        this.search = function() {
+            this.filter({ source: filter_sources }, this.getChoice());
+            this.request(this.requestParams(source));
+        };
 
+        this.request = function(url) {
+            var _this = this;
+            number_of_requests++;
+            network.timeout(10000);
+            network.silent(account(url), function(response) {
+                _this.parse(response);
+            }, function() {
+                scroll.clear();
+                scroll.append('<div style="color:#fff;text-align:center;padding:2em;">Ничего не найдено</div>');
+                _this.loading(false);
+            }, false, { dataType: 'text', headers: addHeaders() });
+        };
+
+        this.parse = function(str) {
+            try {
+                var items = [];
+                var html = $('<div>' + str + '</div>');
+                html.find('.videos__item').each(function() {
+                    var item = $(this);
+                    var data = JSON.parse(item.attr('data-json'));
+                    var text = item.text();
+                    if (text && !object.movie.name && text.match(/\d+p/i)) {
+                        if (!data.quality) { data.quality = {}; data.quality[text] = data.url; }
+                    }
+                    if (text) data.text = text;
+                    data.active = item.hasClass('active');
+                    items.push(data);
+                });
+
+                var videos = items.filter(function(v) { return v.method == 'play' || v.method == 'call'; });
+                if (videos.length) {
+                    this.activity.loader(false);
+                    this.display(videos);
+                } else {
+                    scroll.clear();
+                    scroll.append('<div style="color:#fff;text-align:center;padding:2em;">Источники не найдены</div>');
+                    this.loading(false);
+                }
+            } catch(e) {
+                scroll.clear();
+                scroll.append('<div style="color:#fff;text-align:center;padding:2em;">Ошибка обработки данных</div>');
+                this.loading(false);
+            }
+        };
+
+        this.display = function(videos) {
+            var _this = this;
+            scroll.clear();
+            videos.forEach(function(video, i) {
+                var item = $('<div class="selector" style="padding:1em;margin:0.5em 0;background:rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;">' +
+                    '<div style="font-size:1.2em;font-weight:700;">' + (video.text || video.title || 'Источник ' + (i+1)) + '</div>' +
+                    '<div style="color:#aaa;">' + (Object.keys(video.quality || {}).join(', ') || '') + '</div>' +
+                    '</div>');
+                item.on('hover:enter', function() {
+                    var url = video.url;
+                    if (video.quality && Object.keys(video.quality).length) {
+                        url = video.quality[Object.keys(video.quality)[0]];
+                    }
+                    network.silent(account(url), function(json) {
+                        if (json && json.url) {
+                            Lampa.Player.play({ title: video.text || object.movie.title, url: json.url, isonline: true });
+                        } else if (json && typeof json === 'string') {
+                            Lampa.Player.play({ title: video.text || object.movie.title, url: json, isonline: true });
+                        } else {
+                            Lampa.Player.play({ title: video.text || object.movie.title, url: url, isonline: true });
+                        }
+                    }, function() {
+                        Lampa.Player.play({ title: video.text || object.movie.title, url: url, isonline: true });
+                    }, false, { dataType: 'json', headers: addHeaders() });
+                });
+                scroll.append(item);
+            });
+            this.loading(false);
+            Lampa.Controller.enable('content');
+        };
+
+        this.getChoice = function() {
+            return Lampa.Storage.cache('showy_choice', 3000, {})[object.movie.id] || { season: 0, voice: 0 };
+        };
+        this.saveChoice = function(choice) {
+            var data = Lampa.Storage.cache('showy_choice', 3000, {});
+            data[object.movie.id] = choice;
+            Lampa.Storage.set('showy_choice', data);
+        };
+        this.replaceChoice = function(choice) {
+            var to = this.getChoice();
+            Lampa.Arrays.extend(to, choice, true);
+            this.saveChoice(to);
+        };
+        this.reset = function() { scroll.clear(); scroll.body().append(Lampa.Template.get('lampac_content_loading')); };
+        this.loading = function(status) {
+            if (status) this.activity.loader(true);
+            else { this.activity.loader(false); this.activity.toggle(); }
+        };
+        this.filter = function(items, choice) {
+            filter.set('sort', filter_sources.map(function(e) {
+                return { title: sources[e].name, source: e, selected: e == balancer };
+            }));
+        };
         this.start = function() {
-            if (Lampa.Activity.active().activity !== this.activity) return;
             if (!initialized) { initialized = true; this.initialize(); }
             Lampa.Controller.add('content', {
-                toggle: function() { Lampa.Controller.collectionSet(scroll.render(), files.render()); Lampa.Controller.collectionFocus(last || false, scroll.render()); },
-                gone: function() { clearTimeout(balanser_timer); },
-                up: function() { if (Navigator.canmove('up')) Navigator.move('up'); else Lampa.Controller.toggle('head'); },
-                down: function() { Navigator.move('down'); },
-                right: function() { if (Navigator.canmove('right')) Navigator.move('right'); else filter.show(Lampa.Lang.translate('title_filter'), 'filter'); },
-                left: function() { if (Navigator.canmove('left')) Navigator.move('left'); else Lampa.Controller.toggle('menu'); },
-                back: this.back.bind(this)
+                toggle: function() { Lampa.Controller.collectionSet(scroll.render()); },
+                back: function() { Lampa.Activity.backward(); }
             });
             Lampa.Controller.toggle('content');
         };
         this.render = function() { return files.render(); };
         this.back = function() { Lampa.Activity.backward(); };
-        this.destroy = function() { network.clear(); files.destroy(); scroll.destroy(); clearInterval(balanser_timer); clearTimeout(life_wait_timer); };
+        this.destroy = function() { network.clear(); files.destroy(); scroll.destroy(); };
     }
 
     function startPlugin() {
@@ -134,19 +239,24 @@
 
         Lampa.Listener.follow('full', function(e) {
             if (e.type == 'complite') {
-                var btn = $('<div class="full-start__button selector" style="background:#e53935;color:#fff;padding:8px 16px;border-radius:8px;margin:4px;cursor:pointer;text-align:center;">🎬 Showy</div>');
-                btn.on('hover:enter', function() {
-                    Lampa.Component.add('showy_online', component);
-                    Lampa.Activity.push({
-                        url: '',
-                        title: 'Showy',
-                        component: 'showy_online',
-                        search: e.data.movie.title,
-                        movie: e.data.movie,
-                        page: 1
-                    });
-                });
-                e.object.activity.render().find('.view--torrent').after(btn);
+                setTimeout(function() {
+                    var container = $('.view--torrent');
+                    if (!container.find('.showy-btn').length) {
+                        var btn = $('<div class="full-start__button selector showy-btn" style="background:#e53935;color:#fff;padding:8px 16px;border-radius:8px;margin:4px;cursor:pointer;text-align:center;">🎬 Showy</div>');
+                        btn.on('hover:enter', function() {
+                            Lampa.Component.add('showy_online', component);
+                            Lampa.Activity.push({
+                                url: '',
+                                title: 'Showy',
+                                component: 'showy_online',
+                                search: e.data.movie.title,
+                                movie: e.data.movie,
+                                page: 1
+                            });
+                        });
+                        container.append(btn);
+                    }
+                }, 500);
             }
         });
     }
