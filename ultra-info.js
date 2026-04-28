@@ -233,33 +233,45 @@
         this.destroy = function() { network.clear(); files.destroy(); scroll.destroy(); };
     }
 
-    function startPlugin() {
-        window.showy_plugin = true;
-        Lampa.Component.add('showy_online', component);
+    function addButton() {
+        var container = document.querySelector('.view--torrent');
+        if (!container) container = document.querySelector('.full-start__buttons');
+        if (!container) return;
+        if (container.querySelector('.showy-btn')) return;
 
+        var btn = document.createElement('div');
+        btn.className = 'full-start__button selector showy-btn';
+        btn.style.cssText = 'background:#e53935;color:#fff;padding:8px 16px;border-radius:8px;margin:4px;cursor:pointer;text-align:center;';
+        btn.textContent = '🎬 Showy';
+        btn.onclick = function() {
+            var movie = window._showy_movie;
+            if (!movie) return;
+            Lampa.Component.add('showy_online', component);
+            Lampa.Activity.push({
+                url: '',
+                title: 'Showy',
+                component: 'showy_online',
+                search: movie.title,
+                movie: movie,
+                page: 1
+            });
+        };
+        container.appendChild(btn);
+    }
+
+    function init() {
         Lampa.Listener.follow('full', function(e) {
-            if (e.type == 'complite') {
-                setTimeout(function() {
-                    var container = $('.view--torrent');
-                    if (!container.find('.showy-btn').length) {
-                        var btn = $('<div class="full-start__button selector showy-btn" style="background:#e53935;color:#fff;padding:8px 16px;border-radius:8px;margin:4px;cursor:pointer;text-align:center;">🎬 Showy</div>');
-                        btn.on('hover:enter', function() {
-                            Lampa.Component.add('showy_online', component);
-                            Lampa.Activity.push({
-                                url: '',
-                                title: 'Showy',
-                                component: 'showy_online',
-                                search: e.data.movie.title,
-                                movie: e.data.movie,
-                                page: 1
-                            });
-                        });
-                        container.append(btn);
-                    }
-                }, 500);
+            if (e.type === 'complite') {
+                window._showy_movie = e.data.movie || e.data;
+                setTimeout(addButton, 500);
+                setTimeout(addButton, 1000);
+                setTimeout(addButton, 2000);
             }
         });
     }
 
-    if (!window.showy_plugin) startPlugin();
+    if (window.appready) init();
+    else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
+
+    window.showy_plugin = true;
 })();
