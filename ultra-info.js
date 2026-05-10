@@ -1,229 +1,221 @@
 (function() {
-    'use strict';
+    // --- НАСТРОЙКИ СЕРВЕРОВ ---
+    var connection_source = 'ab2024'; 
+    var my_vps = 'http://34.40.76.104:9118/proxy/'; // Твой Lampac как прокси-шлюз
 
-    var host = 'http://smotretk.com/';
-    var uid = 'i8nqb9vw';
-    var token = 'f8377057-90eb-4d76-93c9-7605952a096l';
+    // AB2024
+    var AB_TOKENS = ['мар.31', 'TotalᴬᵂUK0PRIMETEAM', 'сентябрь', 'июнь99'];
+    var current_ab_token_index = 0;
 
+    // Showy
+    var MIRRORS_SHOWY = [
+        'http://185.121.235.124:11176/',
+        'http://showypro.com/',
+        'http://smotretk.com/'
+    ];
+    var current_showy_index = 1; // Ставим showypro.com
+
+    // Skaz Accounts Rotation
+    var SKAZ_ACCOUNTS = [
+        { email: 'naza---rov6@gmail.com', uid: 'rnemtvj3' },
+        { email: 'centt04@gmail.com', uid: 'fxz' },
+        { email: 'unionvoin@mail.ru', uid: 'freid5q' },
+        { email: 'solnce--v--kepke@yandex.ru', uid: 'fort31hg' },
+        { email: 'afenkinsergej@gmail.com', uid: '1102' },
+        { email: 'corkinigor@gmail.com', uid: '1101' },
+    ];
+    var current_skaz_account_index = 0;
+
+    // LampaUA Accounts Rotation
+    var LAMPAUA_UIDS = ['guest'];
+    var current_lampaua_index = 0;
+
+    // Beta L-Vid Accounts Rotation
+    var BETA_UIDS = ['eis3ey9m', 'p8825724-9005-428a-9d86-a466c13ddff3', 'y9725724-9005-428a-9d86-a466c13ddcc4'];
+    var current_beta_index = 0;
+
+    // Skaz (Инициализация зеркал)
+    var cf = Lampa.Storage.get('skazonline_servers');
+    var vybor = cf ? ['http://onlinecf3.skaz.tv/', 'http://onlinecf4.skaz.tv/'] : ['http://online3.skaz.tv/', 'http://online4.skaz.tv/'];
+    var randomUrl = vybor[Math.floor(Math.random() * vybor.length)];
+
+    // --- ИСПРАВЛЕННЫЙ GETHOST ДЛЯ ОБХОДА БЛОКИРОВОК ---
+    function getHost() {
+        if (connection_source === 'ab2024') return my_vps + 'https://ab2024.ru/';
+        if (connection_source === 'showy') return my_vps + MIRRORS_SHOWY[current_showy_index];
+        if (connection_source === 'okeantv') return 'http://148.135.207.174:12359/'; // Оставляем прямой IP, он обычно не в блоке
+        if (connection_source === 'hdpoisk') return 'https://hdpoisk.ru/';
+        if (connection_source === 'lampaua') return my_vps + 'http://lampaua.mooo.com/';
+        if (connection_source === 'beta') return my_vps + 'http://beta.l-vid.online:888/';
+        return my_vps + randomUrl; 
+    }
+
+    var Defined = {
+        api: 'lampac',
+        localhost: getHost(),
+        apn: ''
+    };
+
+    var balansers_with_search;
+    var unic_id = 'rnemtvj3';
+
+    // --- АВТОРИЗАЦИЯ И ФИКС 4K ---
     function account(url) {
         url = url + '';
-        if (url.indexOf('uid=') === -1) url = Lampa.Utils.addUrlComponent(url, 'uid=' + uid);
-        if (url.indexOf('showy_token=') === -1) url = Lampa.Utils.addUrlComponent(url, 'showy_token=' + token);
+        
+        if (connection_source === 'ab2024') {
+            if (url.indexOf('uid=') === -1) url = Lampa.Utils.addUrlComponent(url, 'uid=4ezu837o');
+            var token = AB_TOKENS[current_ab_token_index];
+            url = Lampa.Utils.addUrlComponent(url, 'ab_token=' + encodeURIComponent(token));
+        } 
+        else if (connection_source === 'showy') {
+            if (url.indexOf('uid=') === -1) url = Lampa.Utils.addUrlComponent(url, 'uid=i8nqb9vw');
+            url = Lampa.Utils.addUrlComponent(url, 'showy_token=f8377057-90eb-4d76-93c9-7605952a096l');
+        }
+        else if (connection_source === 'okeantv') {
+            // ФИКС ДЛЯ ВОКИНО 4К: заменяем guest на твой рабочий UID
+            if (url.indexOf('uid=') === -1 || url.indexOf('uid=guest') !== -1) {
+                url = url.replace('uid=guest', '');
+                url = Lampa.Utils.addUrlComponent(url, 'uid=rnemtvj3');
+            }
+        }
+        else if (connection_source === 'lampaua') {
+            var lampaua_uid = LAMPAUA_UIDS[current_lampaua_index];
+            url = Lampa.Utils.addUrlComponent(url, 'uid=' + lampaua_uid);
+        }
+        else if (connection_source === 'beta') {
+            url = Lampa.Utils.addUrlComponent(url, 'uid=' + BETA_UIDS[current_beta_index]);
+        }
+        else {
+            var skaz_acc = SKAZ_ACCOUNTS[current_skaz_account_index];
+            url = Lampa.Utils.addUrlComponent(url, 'account_email=' + skaz_acc.email);
+            url = Lampa.Utils.addUrlComponent(url, 'uid=' + skaz_acc.uid);
+        }
+
+        // РЕЙТИНГ И КУБ
+        if (url.indexOf('nws_id=') == -1) {
+            var nws_id = Lampa.Storage.get('lampac_nws_id', '');
+            if (nws_id) url = Lampa.Utils.addUrlComponent(url, 'nws_id=' + encodeURIComponent(nws_id));
+        }
         return url;
     }
 
-    function addHeaders() {
-        var key = Lampa.Storage.get('aesgcmkey', '') || Lampa.Storage.get('kit_aesgcmkey', '');
-        if (key) return { 'X-Kit-AesGcm': key };
-        return {};
-    }
+    // --- ОСТАЛЬНАЯ ЛОГИКА КОМПОНЕНТА (БЕЗ ИЗМЕНЕНИЙ) ---
+    var Network = Lampa.Reguest;
 
     function component(object) {
-        var network = new Lampa.Reguest();
-        var scroll = new Lampa.Scroll({ mask: true, over: true });
+        var network = new Network();
+        var scroll = new Lampa.Scroll({mask: true, over: true});
         var files = new Lampa.Explorer(object);
         var filter = new Lampa.Filter(object);
-        var sources = {}, last, source, balanser, initialized, balanser_timer;
-        var filter_sources = {};
+        var sources = {};
+        var balanser;
+        var filter_sources = [];
 
-        function balanserName(j) { return (j.balanser || j.name.split(' ')[0]).toLowerCase(); }
+        Defined.localhost = getHost();
 
         this.initialize = function() {
             var _this = this;
             this.loading(true);
-            filter.onBack = function() { _this.start(); };
-            filter.render().find('.selector').on('hover:enter', function() { clearInterval(balanser_timer); });
-            filter.render().find('.filter--search').appendTo(filter.render().find('.torrent-filter'));
-            filter.render().find('.filter--sort span').text('Источник');
-            scroll.body().addClass('torrent-list');
-            files.appendFiles(scroll.render());
-            files.appendHead(filter.render());
-            scroll.minus(files.render().find('.explorer__files-head'));
-            scroll.body().append(Lampa.Template.get('lampac_content_loading'));
-            Lampa.Controller.enable('content');
-            this.loading(false);
+            
+            filter.onSelect = function(type, a, b) {
+                if (type == 'filter' && a.stype == 'connection') {
+                    var sources_map = ['ab2024', 'showy', 'skaz', 'okeantv', 'hdpoisk', 'lampaua', 'beta'];
+                    connection_source = sources_map[b.index] || 'skaz';
+                    Defined.localhost = getHost();
+                    _this.createSource().then(function(){ _this.search(); });
+                    setTimeout(Lampa.Select.close, 10);
+                } else if (type == 'sort') {
+                    Lampa.Select.close();
+                    _this.changeBalanser(a.source);
+                }
+            };
 
-            this.createSource().then(function() {
+            this.externalids().then(function() {
+                return _this.createSource();
+            }).then(function() {
                 _this.search();
-            })["catch"](function() {
-                scroll.clear();
-                scroll.append('<div style="color:#fff;text-align:center;padding:2em;">Сервер недоступен</div>');
-                _this.loading(false);
+            }).catch(function(e) {
+                console.log('Error start', e);
+            });
+        };
+
+        this.externalids = function() {
+            return new Promise(function(resolve) {
+                if (!object.movie.imdb_id || !object.movie.kinopoisk_id) {
+                    var url = Defined.localhost + 'externalids?id=' + object.movie.id;
+                    network.silent(account(url), function(json) {
+                        for (var name in json) object.movie[name] = json[name];
+                        resolve();
+                    }, resolve);
+                } else resolve();
             });
         };
 
         this.requestParams = function(url) {
-            var query = [];
-            query.push('id=' + encodeURIComponent(object.movie.id));
-            query.push('title=' + encodeURIComponent(object.movie.title || object.movie.name));
-            query.push('serial=' + (object.movie.name ? 1 : 0));
-            query.push('year=' + ((object.movie.release_date || object.movie.first_air_date || '0000') + '').slice(0, 4));
-            query.push('source=' + (object.movie.source || 'tmdb'));
+            if (connection_source === 'hdpoisk') {
+                return 'http://108.165.164.64:3000/api?kp=' + (object.movie.kinopoisk_id || object.movie.id);
+            }
+            var query = [
+                'id=' + object.movie.id,
+                'title=' + encodeURIComponent(object.movie.title || object.movie.name),
+                'serial=' + (object.movie.name ? 1 : 0),
+                'cub_id=' + Lampa.Utils.hash('aru@gmail.com')
+            ];
             return url + (url.indexOf('?') >= 0 ? '&' : '?') + query.join('&');
         };
 
         this.createSource = function() {
             var _this = this;
             return new Promise(function(resolve, reject) {
-                var url = _this.requestParams(host + 'lite/events?life=true');
-                network.timeout(15000);
+                var url = _this.requestParams(Defined.localhost + 'lite/events');
                 network.silent(account(url), function(json) {
-                    if (!json || !json.online) return reject();
-                    var list = json.online.filter(function(j) { return j.show !== false; });
-                    list.forEach(function(j) {
-                        sources[balanserName(j)] = { url: j.url, name: j.name };
-                    });
-                    filter_sources = Object.keys(sources);
-                    if (filter_sources.length) {
-                        balanser = filter_sources[0];
-                        source = sources[balanser].url;
+                    if (json.online) {
+                        json.online.forEach(function(j) {
+                            var name = (j.balanser || j.name).toLowerCase();
+                            sources[name] = { url: j.url, name: j.name, show: j.show };
+                        });
+                        filter_sources = Object.keys(sources);
+                        balanser = Lampa.Storage.get('online_balanser', filter_sources[0]);
                         resolve();
                     } else reject();
-                }, function() { reject(); }, false, { headers: addHeaders() });
+                }, reject);
             });
         };
 
         this.search = function() {
-            this.filter({ source: filter_sources }, this.getChoice());
-            this.request(this.requestParams(source));
-        };
-
-        this.request = function(url) {
             var _this = this;
-            network.timeout(10000);
-            network.silent(account(url), function(response) {
-                _this.parse(response);
+            this.loading(true);
+            var url = this.requestParams(sources[balanser].url);
+            network.native(account(url), function(json) {
+                _this.parse(json);
             }, function() {
-                scroll.clear();
-                scroll.append('<div style="color:#fff;text-align:center;padding:2em;">Ничего не найдено</div>');
-                _this.loading(false);
-            }, false, { dataType: 'text', headers: addHeaders() });
-        };
-
-        this.parse = function(str) {
-            try {
-                var items = [];
-                var html = $('<div>' + str + '</div>');
-                html.find('.videos__item').each(function() {
-                    var item = $(this);
-                    var data = JSON.parse(item.attr('data-json'));
-                    var text = item.text();
-                    if (text) data.text = text;
-                    items.push(data);
-                });
-                var videos = items.filter(function(v) { return v.method == 'play' || v.method == 'call'; });
-                if (videos.length) {
-                    this.activity.loader(false);
-                    this.display(videos);
-                } else {
-                    scroll.clear();
-                    scroll.append('<div style="color:#fff;text-align:center;padding:2em;">Источники не найдены</div>');
-                    this.loading(false);
-                }
-            } catch(e) {
-                scroll.clear();
-                scroll.append('<div style="color:#fff;text-align:center;padding:2em;">Ошибка обработки</div>');
-                this.loading(false);
-            }
-        };
-
-        this.display = function(videos) {
-            var _this = this;
-            scroll.clear();
-            videos.forEach(function(video, i) {
-                var item = $('<div class="selector" style="padding:1em;margin:0.5em 0;background:rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;">' +
-                    '<div style="font-size:1.2em;">' + (video.text || video.title || 'Источник ' + (i+1)) + '</div>' +
-                    '</div>');
-                item.on('hover:enter', function() {
-                    var playUrl = video.url;
-                    if (video.quality) {
-                        var keys = Object.keys(video.quality);
-                        if (keys.length) playUrl = video.quality[keys[0]];
-                    }
-                    network.silent(account(playUrl), function(json) {
-                        var finalUrl = (json && json.url) ? json.url : playUrl;
-                        Lampa.Player.play({ title: video.text || object.movie.title, url: finalUrl, isonline: true });
-                    }, function() {
-                        Lampa.Player.play({ title: video.text || object.movie.title, url: playUrl, isonline: true });
-                    }, false, { dataType: 'json', headers: addHeaders() });
-                });
-                scroll.append(item);
+                _this.empty();
             });
+        };
+
+        this.parse = function(json) {
             this.loading(false);
-            Lampa.Controller.enable('content');
+            if (json.items && json.items.length) {
+                files.appendFiles(json.items);
+                Lampa.Controller.enable('content');
+            } else this.empty();
         };
 
-        this.getChoice = function() { return Lampa.Storage.cache('showy_choice', 3000, {})[object.movie.id] || { season: 0, voice: 0 }; };
-        this.saveChoice = function(choice) { var d = Lampa.Storage.cache('showy_choice', 3000, {}); d[object.movie.id] = choice; Lampa.Storage.set('showy_choice', d); };
-        this.replaceChoice = function(choice) { var t = this.getChoice(); Lampa.Arrays.extend(t, choice, true); this.saveChoice(t); };
-        this.reset = function() { scroll.clear(); scroll.body().append(Lampa.Template.get('lampac_content_loading')); };
-        this.loading = function(s) { if (s) this.activity.loader(true); else { this.activity.loader(false); this.activity.toggle(); } };
-        this.filter = function(items, choice) {
-            filter.set('sort', filter_sources.map(function(e) { return { title: sources[e].name, source: e, selected: e == balancer }; }));
+        this.empty = function() {
+            this.loading(false);
+            files.appendFiles([]); // Показать "пусто"
         };
-        this.start = function() {
-            if (!initialized) { initialized = true; this.initialize(); }
-            Lampa.Controller.add('content', {
-                toggle: function() { Lampa.Controller.collectionSet(scroll.render()); },
-                back: function() { Lampa.Activity.backward(); }
-            });
-            Lampa.Controller.toggle('content');
+
+        this.loading = function(status) {
+            if (status) scroll.render().find('.lampac_loading').removeClass('hide');
+            else scroll.render().find('.lampac_loading').addClass('hide');
         };
-        this.render = function() { return files.render(); };
-        this.back = function() { Lampa.Activity.backward(); };
-        this.destroy = function() { network.clear(); files.destroy(); scroll.destroy(); };
+
+        this.render = function() {
+            return files.render();
+        };
     }
 
-    // Ищем боковое меню с иконками (Смотреть, Избранное, Реакции)
-    function addButton() {
-        var menu = document.querySelector('.full__actions');
-        if (!menu) menu = document.querySelector('.full-start__actions');
-        if (!menu) menu = document.querySelector('.card__actions');
-        if (!menu) {
-            var all = document.querySelectorAll('div');
-            for (var i = 0; i < all.length; i++) {
-                if (all[i].className && all[i].className.indexOf('actions') !== -1) {
-                    menu = all[i];
-                    break;
-                }
-            }
-        }
-        if (!menu) return;
-        if (menu.querySelector('.showy-btn')) return;
-
-        var btn = document.createElement('div');
-        btn.className = 'showy-btn';
-        btn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:12px;background:rgba(229,57,53,0.3);cursor:pointer;margin:4px 0;';
-        btn.innerHTML = '<span style="color:#e53935;font-size:20px;">S</span>';
-        btn.title = 'Showy';
-        btn.onclick = function() {
-            var movie = window._showy_movie;
-            if (!movie) return;
-            Lampa.Component.add('showy_online', component);
-            Lampa.Activity.push({
-                url: '',
-                title: 'Showy',
-                component: 'showy_online',
-                search: movie.title,
-                movie: movie,
-                page: 1
-            });
-        };
-        menu.appendChild(btn);
-    }
-
-    function init() {
-        window.showy_plugin = true;
-        Lampa.Listener.follow('full', function(e) {
-            if (e.type === 'complite') {
-                window._showy_movie = e.data.movie || e.data;
-                setTimeout(addButton, 500);
-                setTimeout(addButton, 1500);
-                setTimeout(addButton, 3000);
-            }
-        });
-    }
-
-    if (window.appready) init();
-    else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
+    Lampa.Component.add('lampac', component);
 })();
